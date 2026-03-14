@@ -34,10 +34,7 @@ interface ScenarioData {
   aptStatus: ApartmentStatus;
   hasMamad: boolean;
   renoSqm: Record<string, number>;
-}
-
-interface GlobalSettings {
-  renoRates: Record<string, number>;
+  // Advanced (per-scenario)
   buyerLawyerPct: number;
   brokerPct: number;
   appraiserCost: number;
@@ -49,6 +46,10 @@ interface GlobalSettings {
   sellerRepairs: number;
   sellerAppraiser: number;
   mortgagePerMillion: number;
+}
+
+interface GlobalRates {
+  renoRates: Record<string, number>;
 }
 
 interface ComputedResults {
@@ -83,26 +84,26 @@ function formatNum(n: number): string {
   return Math.round(n).toLocaleString("he-IL");
 }
 
-function computeResults(s: ScenarioData, g: GlobalSettings): ComputedResults {
+function computeResults(s: ScenarioData, rates: Record<string, number>): ComputedResults {
   const hasApartment = s.aptStatus !== "none";
   const monthlyPayment = hasApartment ? 10000 : 6000;
-  const mortgageMultiplier = 1000000 / g.mortgagePerMillion;
+  const mortgageMultiplier = 1000000 / s.mortgagePerMillion;
   const mortgageCapacity = monthlyPayment * mortgageMultiplier;
 
   const sellingCosts =
-    s.salePrice * (g.sellerLawyerPct / 100) +
-    s.salePrice * (g.sellerBrokerPct / 100) +
-    g.sellerPrepCost + g.sellerRepairs + g.sellerAppraiser + MORTGAGE_PAYOFF;
+    s.salePrice * (s.sellerLawyerPct / 100) +
+    s.salePrice * (s.sellerBrokerPct / 100) +
+    s.sellerPrepCost + s.sellerRepairs + s.sellerAppraiser + MORTGAGE_PAYOFF;
 
   const netFromSale = s.salePrice - sellingCosts;
   const totalBudget = netFromSale + s.additionalEquity + mortgageCapacity;
 
   const renovationCost = RENO_LEVELS.reduce(
-    (sum, level) => sum + (s.renoSqm[level.key] || 0) * (g.renoRates[level.key] || 0), 0
+    (sum, level) => sum + (s.renoSqm[level.key] || 0) * (rates[level.key] || 0), 0
   );
-  const aptBuildCost = s.aptStatus === "build" ? APT_SQM * (g.renoRates["build"] || 8000) : 0;
+  const aptBuildCost = s.aptStatus === "build" ? APT_SQM * (rates["build"] || 8000) : 0;
   const mamadCost = s.hasMamad ? 0 : MAMAD_BUILD_COST;
-  const fixedBuyCosts = g.appraiserCost + g.inspectionCost + g.mortgageAdvisor;
+  const fixedBuyCosts = s.appraiserCost + s.inspectionCost + s.mortgageAdvisor;
 
   const budgetForProperty = totalBudget - renovationCost - aptBuildCost - mamadCost - fixedBuyCosts;
   let maxPropertyPrice = 0;
@@ -110,15 +111,15 @@ function computeResults(s: ScenarioData, g: GlobalSettings): ComputedResults {
     let lo = 0, hi = budgetForProperty;
     for (let i = 0; i < 100; i++) {
       const mid = (lo + hi) / 2;
-      const cost = mid * (1 + g.buyerLawyerPct / 100 + g.brokerPct / 100) + calcPurchaseTax(mid);
+      const cost = mid * (1 + s.buyerLawyerPct / 100 + s.brokerPct / 100) + calcPurchaseTax(mid);
       if (cost <= budgetForProperty) lo = mid; else hi = mid;
     }
     maxPropertyPrice = Math.floor(lo);
   }
 
   const purchaseTax = calcPurchaseTax(maxPropertyPrice);
-  const buyerLawyer = maxPropertyPrice * (g.buyerLawyerPct / 100);
-  const buyerBroker = maxPropertyPrice * (g.brokerPct / 100);
+  const buyerLawyer = maxPropertyPrice * (s.buyerLawyerPct / 100);
+  const buyerBroker = maxPropertyPrice * (s.brokerPct / 100);
   const grandTotal = maxPropertyPrice + buyerLawyer + buyerBroker + purchaseTax + fixedBuyCosts + renovationCost + aptBuildCost + mamadCost;
 
   return {
@@ -129,30 +130,23 @@ function computeResults(s: ScenarioData, g: GlobalSettings): ComputedResults {
 }
 
 // --- Storage ---
-const SCENARIOS_KEY = "kadysh-calc-scenarios";
-const SETTINGS_KEY = "kadysh-calc-settings";
+const SCENARIOS_KEY = "kadysh-calc-scenarios-v2";
+const RATES_KEY = "kadysh-calc-rates";
 
 function loadScenarios(): ScenarioData[] {
   try { return JSON.parse(localStorage.getItem(SCENARIOS_KEY) || "[]"); } catch { return []; }
 }
 function persistScenarios(s: ScenarioData[]) { localStorage.setItem(SCENARIOS_KEY, JSON.stringify(s)); }
 
-const DEFAULT_SETTINGS: GlobalSettings = {
-  renoRates: Object.fromEntries(RENO_LEVELS.map((l) => [l.key, l.defaultRate])),
-  buyerLawyerPct: 0.5, brokerPct: 1.5,
-  appraiserCost: 2500, inspectionCost: 3500, mortgageAdvisor: 5000,
-  sellerLawyerPct: 0.75, sellerBrokerPct: 1.5,
-  sellerPrepCost: 5000, sellerRepairs: 5000, sellerAppraiser: 2500,
-  mortgagePerMillion: 5000,
-};
+const DEFAULT_RATES: Record<string, number> = Object.fromEntries(RENO_LEVELS.map((l) => [l.key, l.defaultRate]));
 
-function loadSettings(): GlobalSettings {
+function loadRates(): Record<string, number> {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : { ...DEFAULT_SETTINGS };
-  } catch { return { ...DEFAULT_SETTINGS }; }
+    const raw = localStorage.getItem(RATES_KEY);
+    return raw ? { ...DEFAULT_RATES, ...JSON.parse(raw) } : { ...DEFAULT_RATES };
+  } catch { return { ...DEFAULT_RATES }; }
 }
-function persistSettings(s: GlobalSettings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
+function persistRates(r: Record<string, number>) { localStorage.setItem(RATES_KEY, JSON.stringify(r)); }
 
 // --- Components ---
 function NumberInput({ value, onChange, label, suffix }: {
@@ -176,28 +170,30 @@ function defaultScenario(): ScenarioData {
     salePrice: 3800000, additionalEquity: 500000,
     aptStatus: "none", hasMamad: true,
     renoSqm: { movein: 130, cosmetic: 0, medium: 0, deep: 0, build: 0 },
+    buyerLawyerPct: 0.5, brokerPct: 1.5,
+    appraiserCost: 2500, inspectionCost: 3500, mortgageAdvisor: 5000,
+    sellerLawyerPct: 0.75, sellerBrokerPct: 1.5,
+    sellerPrepCost: 5000, sellerRepairs: 5000, sellerAppraiser: 2500,
+    mortgagePerMillion: 5000,
   };
 }
 
 // --- Main App ---
 export default function App() {
   const [scenarios, setScenarios] = useState<ScenarioData[]>(loadScenarios);
-  const [settings, setSettings] = useState<GlobalSettings>(loadSettings);
+  const [renoRates, setRenoRates] = useState<Record<string, number>>(loadRates);
   const [current, setCurrent] = useState<ScenarioData | null>(null);
   const [newName, setNewName] = useState("");
   const [showNewInput, setShowNewInput] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showRates, setShowRates] = useState(false);
+  const [showAdvancedInTable, setShowAdvancedInTable] = useState(false);
 
   useEffect(() => { persistScenarios(scenarios); }, [scenarios]);
-  useEffect(() => { persistSettings(settings); }, [settings]);
-
-  const updateSetting = useCallback(<K extends keyof GlobalSettings>(key: K, val: GlobalSettings[K]) => {
-    setSettings((prev) => ({ ...prev, [key]: val }));
-  }, []);
+  useEffect(() => { persistRates(renoRates); }, [renoRates]);
 
   const updateRate = useCallback((key: string, val: number) => {
-    setSettings((prev) => ({ ...prev, renoRates: { ...prev.renoRates, [key]: val } }));
+    setRenoRates((prev) => ({ ...prev, [key]: val }));
   }, []);
 
   const updateCurrent = useCallback(<K extends keyof ScenarioData>(key: K, val: ScenarioData[K]) => {
@@ -232,9 +228,8 @@ export default function App() {
     if (current?.id === id) setCurrent(null);
   }
 
-  // Compute results for all saved scenarios (live with current rates)
-  const scenarioResults = scenarios.map((s) => ({ scenario: s, results: computeResults(s, settings) }));
-  const currentResults = current ? computeResults(current, settings) : null;
+  const scenarioResults = scenarios.map((s) => ({ scenario: s, results: computeResults(s, renoRates) }));
+  const currentResults = current ? computeResults(current, renoRates) : null;
   const r = currentResults;
 
   return (
@@ -256,7 +251,7 @@ export default function App() {
                   <div className="w-28 text-sm text-slate-600">
                     {level.label} <span className="text-xs text-slate-400">({level.labelEn})</span>
                   </div>
-                  <input type="number" value={settings.renoRates[level.key]}
+                  <input type="number" value={renoRates[level.key]}
                     onChange={(e) => updateRate(level.key, Number(e.target.value) || 0)}
                     className="w-24 border border-slate-300 rounded-lg px-2 py-1.5 text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none" dir="ltr" />
                   <span className="text-xs text-slate-500">₪/מ״ר</span>
@@ -277,13 +272,9 @@ export default function App() {
                   placeholder="שם התרחיש..."
                   className="flex-1 px-4 py-3 rounded-xl border border-amber-300 text-sm outline-none focus:ring-2 focus:ring-amber-400" autoFocus />
                 <button onClick={handleNewScenario}
-                  className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-bold transition-colors">
-                  צור
-                </button>
+                  className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-bold transition-colors">צור</button>
                 <button onClick={() => { setShowNewInput(false); setNewName(""); }}
-                  className="px-3 py-3 text-amber-600 hover:bg-amber-100 rounded-xl text-sm transition-colors">
-                  ביטול
-                </button>
+                  className="px-3 py-3 text-amber-600 hover:bg-amber-100 rounded-xl text-sm transition-colors">ביטול</button>
               </div>
             ) : (
               <button onClick={() => setShowNewInput(true)}
@@ -302,13 +293,9 @@ export default function App() {
               </div>
               <div className="flex gap-2">
                 <button onClick={() => { handleSaveScenario(); setCurrent(null); }}
-                  className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-semibold transition-colors">
-                  שמור וסגור
-                </button>
+                  className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-semibold transition-colors">שמור וסגור</button>
                 <button onClick={() => setCurrent(null)}
-                  className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm transition-colors">
-                  ביטול
-                </button>
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm transition-colors">ביטול</button>
               </div>
             </section>
 
@@ -333,7 +320,7 @@ export default function App() {
               <div className="grid grid-cols-3 gap-2">
                 {([
                   { value: "exists" as const, label: "קיימת", desc: "מוכנה להשכרה" },
-                  { value: "build" as const, label: "לבנות", desc: `${formatNum(APT_SQM * (settings.renoRates["build"] || 8000))} ₪` },
+                  { value: "build" as const, label: "לבנות", desc: `${formatNum(APT_SQM * (renoRates["build"] || 8000))} ₪` },
                   { value: "none" as const, label: "אין", desc: "בלי יחידה" },
                 ]).map((opt) => (
                   <button key={opt.value} onClick={() => updateCurrent("aptStatus", opt.value)}
@@ -398,10 +385,10 @@ export default function App() {
                     </div>
                     <div className="text-xs text-slate-400">×</div>
                     <div className="text-sm text-slate-500 w-20 text-center" dir="ltr">
-                      {formatNum(settings.renoRates[level.key])} ₪
+                      {formatNum(renoRates[level.key])} ₪
                     </div>
                     <div className="text-sm text-slate-600 font-mono mr-auto" dir="ltr">
-                      = {formatNum((current.renoSqm[level.key] || 0) * (settings.renoRates[level.key] || 0))} ₪
+                      = {formatNum((current.renoSqm[level.key] || 0) * (renoRates[level.key] || 0))} ₪
                     </div>
                   </div>
                 ))}
@@ -430,8 +417,8 @@ export default function App() {
 
               <div className="mt-4 pt-4 border-t border-white/20 text-sm space-y-1">
                 <div className="flex justify-between"><span>מחיר נכס</span><span dir="ltr">{formatNum(r!.maxPropertyPrice)} ₪</span></div>
-                <div className="flex justify-between opacity-75"><span>עו״ד קונה ({settings.buyerLawyerPct}%)</span><span dir="ltr">{formatNum(r!.buyerLawyer)} ₪</span></div>
-                <div className="flex justify-between opacity-75"><span>תיווך ({settings.brokerPct}%)</span><span dir="ltr">{formatNum(r!.buyerBroker)} ₪</span></div>
+                <div className="flex justify-between opacity-75"><span>עו״ד קונה ({current.buyerLawyerPct}%)</span><span dir="ltr">{formatNum(r!.buyerLawyer)} ₪</span></div>
+                <div className="flex justify-between opacity-75"><span>תיווך ({current.brokerPct}%)</span><span dir="ltr">{formatNum(r!.buyerBroker)} ₪</span></div>
                 <div className="flex justify-between opacity-75"><span>מס רכישה</span><span dir="ltr">{formatNum(r!.purchaseTax)} ₪</span></div>
                 <div className="flex justify-between opacity-75"><span>עלויות קבועות</span><span dir="ltr">{formatNum(r!.fixedBuyCosts)} ₪</span></div>
                 {r!.renovationCost > 0 && <div className="flex justify-between opacity-75"><span>שיפוץ</span><span dir="ltr">{formatNum(r!.renovationCost)} ₪</span></div>}
@@ -439,6 +426,54 @@ export default function App() {
                 {r!.mamadCost > 0 && <div className="flex justify-between opacity-75"><span>בניית ממ״ד</span><span dir="ltr">{formatNum(r!.mamadCost)} ₪</span></div>}
                 <div className="flex justify-between pt-2 border-t border-white/20 font-semibold"><span>עלויות מכירה + החזר משכנתא</span><span dir="ltr">{formatNum(r!.sellingCosts)} ₪</span></div>
               </div>
+            </section>
+
+            {/* Advanced Settings (per scenario) */}
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-4">
+              <button onClick={() => setShowAdvanced(!showAdvanced)}
+                className="w-full p-4 text-sm text-slate-500 flex items-center justify-between hover:bg-slate-50 rounded-2xl transition-colors">
+                <span>הגדרות מתקדמות (תרחיש זה)</span>
+                <span className="text-lg">{showAdvanced ? "▲" : "▼"}</span>
+              </button>
+              {showAdvanced && (
+                <div className="px-6 pb-6 space-y-6">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-600 mb-3">עלויות רכישה</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <NumberInput label="עו״ד קונה (%)" value={current.buyerLawyerPct} onChange={(v) => updateCurrent("buyerLawyerPct", v)} suffix="%" />
+                      <NumberInput label="תיווך (%)" value={current.brokerPct} onChange={(v) => updateCurrent("brokerPct", v)} suffix="%" />
+                      <NumberInput label="שמאי" value={current.appraiserCost} onChange={(v) => updateCurrent("appraiserCost", v)} suffix="₪" />
+                      <NumberInput label="בדק בית" value={current.inspectionCost} onChange={(v) => updateCurrent("inspectionCost", v)} suffix="₪" />
+                      <NumberInput label="יועץ משכנתאות" value={current.mortgageAdvisor} onChange={(v) => updateCurrent("mortgageAdvisor", v)} suffix="₪" />
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-600 mb-3">עלויות מכירה (נכס נוכחי)</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <NumberInput label="עו״ד מוכר (%)" value={current.sellerLawyerPct} onChange={(v) => updateCurrent("sellerLawyerPct", v)} suffix="%" />
+                      <NumberInput label="תיווך מוכר (%)" value={current.sellerBrokerPct} onChange={(v) => updateCurrent("sellerBrokerPct", v)} suffix="%" />
+                      <NumberInput label="הכנת נכס למכירה" value={current.sellerPrepCost} onChange={(v) => updateCurrent("sellerPrepCost", v)} suffix="₪" />
+                      <NumberInput label="תיקונים קלים" value={current.sellerRepairs} onChange={(v) => updateCurrent("sellerRepairs", v)} suffix="₪" />
+                      <NumberInput label="שמאי מכירה" value={current.sellerAppraiser} onChange={(v) => updateCurrent("sellerAppraiser", v)} suffix="₪" />
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-600 mb-3">משכנתא</h3>
+                    <NumberInput label="החזר חודשי לכל מיליון (₪)" value={current.mortgagePerMillion} onChange={(v) => updateCurrent("mortgagePerMillion", v)} suffix="₪/חודש" />
+                    <p className="text-xs text-slate-400 mt-1">ברירת מחדל: 5,000 ₪/חודש למיליון (≈30 שנה)</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-600 mb-2">מדרגות מס רכישה (דירה יחידה)</h3>
+                    <div className="text-xs text-slate-500 space-y-1">
+                      <div>עד 1,920,000: 0%</div>
+                      <div>1,920,001 – 2,300,000: 3.5%</div>
+                      <div>2,300,001 – 5,000,000: 5%</div>
+                      <div>5,000,001 – 17,000,000: 8%</div>
+                      <div>מעל 17,000,000: 10%</div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
 
             {/* Save bar */}
@@ -467,7 +502,7 @@ export default function App() {
           </>
         )}
 
-        {/* Comparison Table — always visible when scenarios exist */}
+        {/* Comparison Table */}
         {scenarioResults.length > 0 && (
           <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-4">
             <h2 className="text-lg font-semibold mb-4 text-slate-700">השוואת תרחישים</h2>
@@ -541,6 +576,72 @@ export default function App() {
                       <td key={s.id} className="text-center py-2 px-2 font-bold text-slate-700" dir="ltr">{formatNum(res.grandTotal)} ₪</td>
                     ))}
                   </tr>
+
+                  {/* Collapsible advanced rows */}
+                  <tr>
+                    <td colSpan={scenarioResults.length + 1} className="py-1">
+                      <button onClick={() => setShowAdvancedInTable(!showAdvancedInTable)}
+                        className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors">
+                        <span>{showAdvancedInTable ? "▲" : "▼"}</span>
+                        <span>פרמטרים מתקדמים</span>
+                      </button>
+                    </td>
+                  </tr>
+                  {showAdvancedInTable && (
+                    <>
+                      <tr className="bg-slate-50">
+                        <td className="py-1.5 pr-2 text-xs text-slate-500">עו״ד קונה</td>
+                        {scenarioResults.map(({ scenario: s }) => (
+                          <td key={s.id} className="text-center py-1.5 px-2 text-xs text-slate-500" dir="ltr">{s.buyerLawyerPct}%</td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 pr-2 text-xs text-slate-500">תיווך קונה</td>
+                        {scenarioResults.map(({ scenario: s }) => (
+                          <td key={s.id} className="text-center py-1.5 px-2 text-xs text-slate-500" dir="ltr">{s.brokerPct}%</td>
+                        ))}
+                      </tr>
+                      <tr className="bg-slate-50">
+                        <td className="py-1.5 pr-2 text-xs text-slate-500">שמאי + בדק בית + יועץ</td>
+                        {scenarioResults.map(({ scenario: s, results: res }) => (
+                          <td key={s.id} className="text-center py-1.5 px-2 text-xs text-slate-500" dir="ltr">{formatNum(res.fixedBuyCosts)} ₪</td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 pr-2 text-xs text-slate-500">עו״ד מוכר</td>
+                        {scenarioResults.map(({ scenario: s }) => (
+                          <td key={s.id} className="text-center py-1.5 px-2 text-xs text-slate-500" dir="ltr">{s.sellerLawyerPct}%</td>
+                        ))}
+                      </tr>
+                      <tr className="bg-slate-50">
+                        <td className="py-1.5 pr-2 text-xs text-slate-500">תיווך מוכר</td>
+                        {scenarioResults.map(({ scenario: s }) => (
+                          <td key={s.id} className="text-center py-1.5 px-2 text-xs text-slate-500" dir="ltr">{s.sellerBrokerPct}%</td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 pr-2 text-xs text-slate-500">עלויות מכירה (קבועות)</td>
+                        {scenarioResults.map(({ scenario: s }) => (
+                          <td key={s.id} className="text-center py-1.5 px-2 text-xs text-slate-500" dir="ltr">
+                            {formatNum(s.sellerPrepCost + s.sellerRepairs + s.sellerAppraiser)} ₪
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="bg-slate-50">
+                        <td className="py-1.5 pr-2 text-xs text-slate-500">החזר משכנתא למיליון</td>
+                        {scenarioResults.map(({ scenario: s }) => (
+                          <td key={s.id} className="text-center py-1.5 px-2 text-xs text-slate-500" dir="ltr">{formatNum(s.mortgagePerMillion)} ₪/חודש</td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 pr-2 text-xs text-slate-500">עלויות מכירה כולל</td>
+                        {scenarioResults.map(({ scenario: s, results: res }) => (
+                          <td key={s.id} className="text-center py-1.5 px-2 text-xs font-mono text-slate-500" dir="ltr">{formatNum(res.sellingCosts)} ₪</td>
+                        ))}
+                      </tr>
+                    </>
+                  )}
+
                   <tr>
                     <td className="py-3 pr-2"></td>
                     {scenarioResults.map(({ scenario: s }) => (
@@ -559,54 +660,6 @@ export default function App() {
             </div>
           </section>
         )}
-
-        {/* Advanced Settings */}
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-4">
-          <button onClick={() => setShowAdvanced(!showAdvanced)}
-            className="w-full p-4 text-sm text-slate-500 flex items-center justify-between hover:bg-slate-50 rounded-2xl transition-colors">
-            <span>הגדרות מתקדמות</span>
-            <span className="text-lg">{showAdvanced ? "▲" : "▼"}</span>
-          </button>
-          {showAdvanced && (
-            <div className="px-6 pb-6 space-y-6">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-600 mb-3">עלויות רכישה</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="עו״ד קונה (%)" value={settings.buyerLawyerPct} onChange={(v) => updateSetting("buyerLawyerPct", v)} suffix="%" />
-                  <NumberInput label="תיווך (%)" value={settings.brokerPct} onChange={(v) => updateSetting("brokerPct", v)} suffix="%" />
-                  <NumberInput label="שמאי" value={settings.appraiserCost} onChange={(v) => updateSetting("appraiserCost", v)} suffix="₪" />
-                  <NumberInput label="בדק בית" value={settings.inspectionCost} onChange={(v) => updateSetting("inspectionCost", v)} suffix="₪" />
-                  <NumberInput label="יועץ משכנתאות" value={settings.mortgageAdvisor} onChange={(v) => updateSetting("mortgageAdvisor", v)} suffix="₪" />
-                </div>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-slate-600 mb-3">עלויות מכירה (נכס נוכחי)</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="עו״ד מוכר (%)" value={settings.sellerLawyerPct} onChange={(v) => updateSetting("sellerLawyerPct", v)} suffix="%" />
-                  <NumberInput label="תיווך מוכר (%)" value={settings.sellerBrokerPct} onChange={(v) => updateSetting("sellerBrokerPct", v)} suffix="%" />
-                  <NumberInput label="הכנת נכס למכירה" value={settings.sellerPrepCost} onChange={(v) => updateSetting("sellerPrepCost", v)} suffix="₪" />
-                  <NumberInput label="תיקונים קלים" value={settings.sellerRepairs} onChange={(v) => updateSetting("sellerRepairs", v)} suffix="₪" />
-                  <NumberInput label="שמאי מכירה" value={settings.sellerAppraiser} onChange={(v) => updateSetting("sellerAppraiser", v)} suffix="₪" />
-                </div>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-slate-600 mb-3">משכנתא</h3>
-                <NumberInput label="החזר חודשי לכל מיליון (₪)" value={settings.mortgagePerMillion} onChange={(v) => updateSetting("mortgagePerMillion", v)} suffix="₪/חודש" />
-                <p className="text-xs text-slate-400 mt-1">ברירת מחדל: 5,000 ₪/חודש למיליון (≈30 שנה)</p>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-slate-600 mb-2">מדרגות מס רכישה (דירה יחידה)</h3>
-                <div className="text-xs text-slate-500 space-y-1">
-                  <div>עד 1,920,000: 0%</div>
-                  <div>1,920,001 – 2,300,000: 3.5%</div>
-                  <div>2,300,001 – 5,000,000: 5%</div>
-                  <div>5,000,001 – 17,000,000: 8%</div>
-                  <div>מעל 17,000,000: 10%</div>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
 
         <footer className="text-center text-xs text-slate-400 pb-8">
           מחשבון תקציב רכישת בית — משפחת קדיש
