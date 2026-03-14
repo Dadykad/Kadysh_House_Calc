@@ -48,9 +48,6 @@ interface ScenarioData {
   mortgagePerMillion: number;
 }
 
-interface GlobalRates {
-  renoRates: Record<string, number>;
-}
 
 interface ComputedResults {
   maxPropertyPrice: number;
