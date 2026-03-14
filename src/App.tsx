@@ -146,15 +146,22 @@ function loadRates(): Record<string, number> {
 function persistRates(r: Record<string, number>) { localStorage.setItem(RATES_KEY, JSON.stringify(r)); }
 
 // --- Components ---
-function NumberInput({ value, onChange, label, suffix }: {
-  value: number; onChange: (v: number) => void; label?: string; suffix?: string;
+function NumberInput({ value, onChange, label, suffix, step, inputClassName }: {
+  value: number; onChange: (v: number) => void; label?: string; suffix?: string; step?: number; inputClassName?: string;
 }) {
+  const [raw, setRaw] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setRaw(String(value)); }, [value, focused]);
+
   return (
     <div>
       {label && <label className="block text-sm font-medium text-slate-600 mb-1">{label}</label>}
       <div className="flex items-center gap-1">
-        <input type="number" value={value} onChange={(e) => onChange(Number(e.target.value) || 0)}
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-left focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" dir="ltr" />
+        <input type="number" value={raw} step={step}
+          onFocus={() => setFocused(true)}
+          onChange={(e) => { setRaw(e.target.value); const n = Number(e.target.value); if (!isNaN(n)) onChange(n); }}
+          onBlur={() => { setFocused(false); setRaw(String(value)); }}
+          className={inputClassName || "w-full border border-slate-300 rounded-lg px-3 py-2 text-left focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"} dir="ltr" />
         {suffix && <span className="text-sm text-slate-500 whitespace-nowrap">{suffix}</span>}
       </div>
     </div>
@@ -248,10 +255,9 @@ export default function App() {
                   <div className="w-28 text-sm text-slate-600">
                     {level.label} <span className="text-xs text-slate-400">({level.labelEn})</span>
                   </div>
-                  <input type="number" value={renoRates[level.key]}
-                    onChange={(e) => updateRate(level.key, Number(e.target.value) || 0)}
-                    className="w-24 border border-slate-300 rounded-lg px-2 py-1.5 text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none" dir="ltr" />
-                  <span className="text-xs text-slate-500">₪/מ״ר</span>
+                  <NumberInput value={renoRates[level.key]} onChange={(v) => updateRate(level.key, v)}
+                    suffix="₪/מ״ר" step={100}
+                    inputClassName="w-24 border border-slate-300 rounded-lg px-2 py-1.5 text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
               ))}
               <p className="text-xs text-slate-400 pt-1">שינוי מחירים מעדכן את כל התרחישים כולל שמורים</p>
@@ -301,9 +307,9 @@ export default function App() {
               <h2 className="text-lg font-semibold mb-4 text-slate-700">מקורות מימון</h2>
               <div className="grid grid-cols-2 gap-4">
                 <NumberInput label="מחיר מכירת הנכס הנוכחי" value={current.salePrice}
-                  onChange={(v) => updateCurrent("salePrice", v)} suffix="₪" />
+                  onChange={(v) => updateCurrent("salePrice", v)} suffix="₪" step={50000} />
                 <NumberInput label="הון עצמי נוסף (קה״ש וכו׳)" value={current.additionalEquity}
-                  onChange={(v) => updateCurrent("additionalEquity", v)} suffix="₪" />
+                  onChange={(v) => updateCurrent("additionalEquity", v)} suffix="₪" step={50000} />
               </div>
               <div className="mt-3 text-sm text-slate-500 flex justify-between">
                 <span>החזר משכנתא: {formatNum(r!.monthlyPayment)} ₪/חודש</span>
@@ -374,11 +380,11 @@ export default function App() {
                       {level.label}
                       <span className="text-xs text-slate-400 block">{level.labelEn}</span>
                     </div>
-                    <div className="flex items-center gap-1 w-24">
-                      <input type="number" value={current.renoSqm[level.key]}
-                        onChange={(e) => updateCurrent("renoSqm", { ...current.renoSqm, [level.key]: Number(e.target.value) || 0 })}
-                        className="w-16 border border-slate-300 rounded-lg px-2 py-1.5 text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none" dir="ltr" />
-                      <span className="text-xs text-slate-500">מ״ר</span>
+                    <div className="w-24">
+                      <NumberInput value={current.renoSqm[level.key]}
+                        onChange={(v) => updateCurrent("renoSqm", { ...current.renoSqm, [level.key]: v })}
+                        suffix="מ״ר" step={5}
+                        inputClassName="w-16 border border-slate-300 rounded-lg px-2 py-1.5 text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                     </div>
                     <div className="text-xs text-slate-400">×</div>
                     <div className="text-sm text-slate-500 w-20 text-center" dir="ltr">
@@ -437,26 +443,26 @@ export default function App() {
                   <div>
                     <h3 className="text-sm font-semibold text-slate-600 mb-3">עלויות רכישה</h3>
                     <div className="grid grid-cols-2 gap-3">
-                      <NumberInput label="עו״ד קונה (%)" value={current.buyerLawyerPct} onChange={(v) => updateCurrent("buyerLawyerPct", v)} suffix="%" />
-                      <NumberInput label="תיווך (%)" value={current.brokerPct} onChange={(v) => updateCurrent("brokerPct", v)} suffix="%" />
-                      <NumberInput label="שמאי" value={current.appraiserCost} onChange={(v) => updateCurrent("appraiserCost", v)} suffix="₪" />
-                      <NumberInput label="בדק בית" value={current.inspectionCost} onChange={(v) => updateCurrent("inspectionCost", v)} suffix="₪" />
-                      <NumberInput label="יועץ משכנתאות" value={current.mortgageAdvisor} onChange={(v) => updateCurrent("mortgageAdvisor", v)} suffix="₪" />
+                      <NumberInput label="עו״ד קונה (%)" value={current.buyerLawyerPct} onChange={(v) => updateCurrent("buyerLawyerPct", v)} suffix="%" step={0.1} />
+                      <NumberInput label="תיווך (%)" value={current.brokerPct} onChange={(v) => updateCurrent("brokerPct", v)} suffix="%" step={0.1} />
+                      <NumberInput label="שמאי" value={current.appraiserCost} onChange={(v) => updateCurrent("appraiserCost", v)} suffix="₪" step={500} />
+                      <NumberInput label="בדק בית" value={current.inspectionCost} onChange={(v) => updateCurrent("inspectionCost", v)} suffix="₪" step={500} />
+                      <NumberInput label="יועץ משכנתאות" value={current.mortgageAdvisor} onChange={(v) => updateCurrent("mortgageAdvisor", v)} suffix="₪" step={500} />
                     </div>
                   </div>
                   <div>
                     <h3 className="text-sm font-semibold text-slate-600 mb-3">עלויות מכירה (נכס נוכחי)</h3>
                     <div className="grid grid-cols-2 gap-3">
-                      <NumberInput label="עו״ד מוכר (%)" value={current.sellerLawyerPct} onChange={(v) => updateCurrent("sellerLawyerPct", v)} suffix="%" />
-                      <NumberInput label="תיווך מוכר (%)" value={current.sellerBrokerPct} onChange={(v) => updateCurrent("sellerBrokerPct", v)} suffix="%" />
-                      <NumberInput label="הכנת נכס למכירה" value={current.sellerPrepCost} onChange={(v) => updateCurrent("sellerPrepCost", v)} suffix="₪" />
-                      <NumberInput label="תיקונים קלים" value={current.sellerRepairs} onChange={(v) => updateCurrent("sellerRepairs", v)} suffix="₪" />
-                      <NumberInput label="שמאי מכירה" value={current.sellerAppraiser} onChange={(v) => updateCurrent("sellerAppraiser", v)} suffix="₪" />
+                      <NumberInput label="עו״ד מוכר (%)" value={current.sellerLawyerPct} onChange={(v) => updateCurrent("sellerLawyerPct", v)} suffix="%" step={0.1} />
+                      <NumberInput label="תיווך מוכר (%)" value={current.sellerBrokerPct} onChange={(v) => updateCurrent("sellerBrokerPct", v)} suffix="%" step={0.1} />
+                      <NumberInput label="הכנת נכס למכירה" value={current.sellerPrepCost} onChange={(v) => updateCurrent("sellerPrepCost", v)} suffix="₪" step={1000} />
+                      <NumberInput label="תיקונים קלים" value={current.sellerRepairs} onChange={(v) => updateCurrent("sellerRepairs", v)} suffix="₪" step={1000} />
+                      <NumberInput label="שמאי מכירה" value={current.sellerAppraiser} onChange={(v) => updateCurrent("sellerAppraiser", v)} suffix="₪" step={500} />
                     </div>
                   </div>
                   <div>
                     <h3 className="text-sm font-semibold text-slate-600 mb-3">משכנתא</h3>
-                    <NumberInput label="החזר חודשי לכל מיליון (₪)" value={current.mortgagePerMillion} onChange={(v) => updateCurrent("mortgagePerMillion", v)} suffix="₪/חודש" />
+                    <NumberInput label="החזר חודשי לכל מיליון (₪)" value={current.mortgagePerMillion} onChange={(v) => updateCurrent("mortgagePerMillion", v)} suffix="₪/חודש" step={100} />
                     <p className="text-xs text-slate-400 mt-1">ברירת מחדל: 5,000 ₪/חודש למיליון (≈30 שנה)</p>
                   </div>
                   <div>
